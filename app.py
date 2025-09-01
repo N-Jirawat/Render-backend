@@ -65,6 +65,60 @@ def check_email():
         return jsonify({"error": str(e)}), 500
 
 
+# ================= อัปเดตอีเมลใน Firebase Auth และ Firestore =================
+@app.route('/update_email', methods=['POST'])
+def update_email():
+    try:
+        data = request.get_json()
+        uid = data.get("uid")
+        new_email = data.get("new_email")
+        
+        if not uid or not new_email:
+            return jsonify({"error": "Missing uid or new_email"}), 400
+
+        # ตรวจสอบว่าอีเมลใหม่ไม่ซ้ำกับคนอื่น
+        try:
+            existing_user = auth.get_user_by_email(new_email)
+            if existing_user.uid != uid:
+                return jsonify({"error": "Email already exists for another user"}), 400
+        except auth.UserNotFoundError:
+            # อีเมลไม่ซ้ำ ดำเนินการต่อได้
+            pass
+
+        # อัปเดตใน Firebase Authentication
+        try:
+            auth.update_user(
+                uid,
+                email=new_email,
+                email_verified=False  # ต้องยืนยันอีเมลใหม่อีกครั้ง
+            )
+            print(f"Updated Firebase Auth email for user {uid}: {new_email}")
+        except Exception as e:
+            return jsonify({"error": f"Failed to update Firebase Auth email: {str(e)}"}), 500
+
+        # อัปเดตใน Firestore
+        try:
+            user_ref = db.collection("users").document(uid)
+            user_ref.update({"email": new_email})
+            print(f"Updated Firestore email for user {uid}: {new_email}")
+        except Exception as e:
+            # หากอัปเดต Firestore ไม่สำเร็จ ให้ rollback Firebase Auth
+            try:
+                # ต้องได้อีเมลเดิมกลับมาก่อน (ถ้าเป็นไปได้)
+                pass  # ในกรณีจริงควรมี rollback mechanism
+            except:
+                pass
+            return jsonify({"error": f"Failed to update Firestore email: {str(e)}"}), 500
+
+        return jsonify({
+            "message": "Email updated successfully",
+            "updated_in": ["firebase_auth", "firestore"],
+            "new_email": new_email
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
 
 @app.route('/', methods=['GET'])
 def home():
