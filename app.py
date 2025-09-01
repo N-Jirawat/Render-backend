@@ -7,8 +7,11 @@ import json
 
 app = Flask(__name__)
 
-# CORS config - อนุญาตเฉพาะ frontend ของคุณ
-CORS(app, resources={r"/*": {"origins": ["https://mangoleafanalyzer.onrender.com", "http://localhost:3000"]}})
+# ✅ เปิด CORS ครอบคลุมทุกเส้นทาง และรองรับ OPTIONS preflight
+CORS(app, resources={r"/*": {"origins": [
+    "https://mangoleafanalyzer.onrender.com",
+    "http://localhost:3000"
+]}}, supports_credentials=True)
 
 # Initialize Firebase Admin SDK
 if not firebase_admin._apps:
@@ -26,8 +29,10 @@ if not firebase_admin._apps:
 db = firestore.client()
 
 # ================= ตรวจสอบ username =================
-@app.route('/check_username', methods=['POST'])
+@app.route('/check_username', methods=['POST', 'OPTIONS'])
 def check_username():
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
     try:
         data = request.get_json()
         username = data.get("username")
@@ -46,8 +51,10 @@ def check_username():
 
 
 # ================= ตรวจสอบ email =================
-@app.route('/check_email', methods=['POST'])
+@app.route('/check_email', methods=['POST', 'OPTIONS'])
 def check_email():
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
     try:
         data = request.get_json()
         email = data.get("email")
@@ -65,9 +72,11 @@ def check_email():
         return jsonify({"error": str(e)}), 500
 
 
-# ================= อัปเดตอีเมลใน Firebase Auth และ Firestore =================
-@app.route('/update_email', methods=['POST'])
+# ================= อัปเดตอีเมล =================
+@app.route('/update_email', methods=['POST', 'OPTIONS'])
 def update_email():
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
     try:
         data = request.get_json()
         uid = data.get("uid")
@@ -82,7 +91,6 @@ def update_email():
             if existing_user.uid != uid:
                 return jsonify({"error": "Email already exists for another user"}), 400
         except auth.UserNotFoundError:
-            # อีเมลไม่ซ้ำ ดำเนินการต่อได้
             pass
 
         # อัปเดตใน Firebase Authentication
@@ -90,7 +98,7 @@ def update_email():
             auth.update_user(
                 uid,
                 email=new_email,
-                email_verified=False  # ต้องยืนยันอีเมลใหม่อีกครั้ง
+                email_verified=False
             )
             print(f"Updated Firebase Auth email for user {uid}: {new_email}")
         except Exception as e:
@@ -102,12 +110,6 @@ def update_email():
             user_ref.update({"email": new_email})
             print(f"Updated Firestore email for user {uid}: {new_email}")
         except Exception as e:
-            # หากอัปเดต Firestore ไม่สำเร็จ ให้ rollback Firebase Auth
-            try:
-                # ต้องได้อีเมลเดิมกลับมาก่อน (ถ้าเป็นไปได้)
-                pass  # ในกรณีจริงควรมี rollback mechanism
-            except:
-                pass
             return jsonify({"error": f"Failed to update Firestore email: {str(e)}"}), 500
 
         return jsonify({
@@ -120,6 +122,7 @@ def update_email():
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
 
+# ================= Home =================
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({"message": "Mango User Management API", "status": "running", "version": "1.0.0"})
@@ -135,8 +138,10 @@ def health_check():
 
 
 # ================= Login ด้วย username =================
-@app.route('/find_email_by_username', methods=['POST'])
+@app.route('/find_email_by_username', methods=['POST', 'OPTIONS'])
 def find_email_by_username():
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
     try:
         data = request.get_json()
         username = data.get("username")
@@ -157,15 +162,17 @@ def find_email_by_username():
 
 
 # ================= ลบผู้ใช้ =================
-@app.route('/delete_user', methods=['DELETE'])
+@app.route('/delete_user', methods=['DELETE', 'OPTIONS'])
 def delete_user():
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
     try:
         data = request.get_json()
         uid = data.get("uid") if data else None
         if not uid:
             return jsonify({"error": "Missing uid parameter"}), 400
 
-        # --- ลบจาก Firestore ---
+        # ลบจาก Firestore
         try:
             user_ref = db.collection("users").document(uid)
             if user_ref.get().exists:
@@ -174,14 +181,15 @@ def delete_user():
         except Exception as e:
             return jsonify({"error": f"Failed to delete Firestore doc: {str(e)}"}), 500
 
-        # --- ลบจาก Firebase Auth ---
+        # ลบจาก Firebase Auth
         try:
             auth.delete_user(uid)
             print(f"Deleted Firebase Auth user: {uid}")
         except Exception as e:
             return jsonify({"error": f"Failed to delete Firebase Auth user: {str(e)}"}), 500
 
-        return jsonify({"message": f"User {uid} deleted successfully", "deleted_from": ["firestore", "firebase_auth"]}), 200
+        return jsonify({"message": f"User {uid} deleted successfully",
+                        "deleted_from": ["firestore", "firebase_auth"]}), 200
 
     except Exception as e:
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
@@ -201,6 +209,16 @@ def test_firebase():
         })
     except Exception as e:
         return jsonify({"error": f"Firebase connection failed: {str(e)}"}), 500
+
+
+# ================= Helper: Preflight response =================
+def _build_cors_preflight_response():
+    response = jsonify({"status": "preflight ok"})
+    response.headers.add("Access-Control-Allow-Origin", "https://mangoleafanalyzer.onrender.com")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+    response.headers.add("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+    response.headers.add("Access-Control-Allow-Credentials", "true")
+    return response
 
 
 if __name__ == '__main__':
