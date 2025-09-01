@@ -25,6 +25,46 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
+# ================= ตรวจสอบ username =================
+@app.route('/check_username', methods=['POST'])
+def check_username():
+    try:
+        data = request.get_json()
+        username = data.get("username")
+        if not username:
+            return jsonify({"error": "Missing username"}), 400
+
+        users_ref = db.collection("users")
+        query = users_ref.where("username", "==", username).limit(1)
+        docs = query.get()
+
+        if docs:
+            return jsonify({"exists": True})
+        return jsonify({"exists": False})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ================= ตรวจสอบ email =================
+@app.route('/check_email', methods=['POST'])
+def check_email():
+    try:
+        data = request.get_json()
+        email = data.get("email")
+        if not email:
+            return jsonify({"error": "Missing email"}), 400
+
+        users_ref = db.collection("users")
+        query = users_ref.where("email", "==", email).limit(1)
+        docs = query.get()
+
+        if docs:
+            return jsonify({"exists": True})
+        return jsonify({"exists": False})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 
 @app.route('/', methods=['GET'])
 def home():
