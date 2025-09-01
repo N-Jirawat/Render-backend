@@ -49,7 +49,6 @@ def find_email_by_username():
         if not username:
             return jsonify({"error": "Missing username"}), 400
 
-        # Query Firestore ใช้ Admin SDK
         users_ref = db.collection("users")
         query = users_ref.where("username", "==", username).limit(1)
         docs = query.get()
@@ -59,7 +58,6 @@ def find_email_by_username():
 
         user_doc = docs[0].to_dict()
         return jsonify({"email": user_doc.get("email")})
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
