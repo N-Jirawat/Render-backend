@@ -29,7 +29,7 @@ if not firebase_admin._apps:
 db = firestore.client()
 
 # ================= ตรวจสอบ username =================
-@app.route('/check_username', methods=['POST', 'OPTIONS'])
+@app.route('/check_username', methods=['POST'])
 def check_username():
     if request.method == "OPTIONS":
         return _build_cors_preflight_response()
@@ -51,7 +51,7 @@ def check_username():
 
 
 # ================= ตรวจสอบ email =================
-@app.route('/check_email', methods=['POST', 'OPTIONS'])
+@app.route('/check_email', methods=['POST'])
 def check_email():
     if request.method == "OPTIONS":
         return _build_cors_preflight_response()
@@ -73,7 +73,7 @@ def check_email():
 
 
 # ================= อัปเดตอีเมล =================
-@app.route('/update_email', methods=['POST', 'OPTIONS'])
+@app.route('/update_email', methods=['POST'])
 def update_email():
     if request.method == "OPTIONS":
         return _build_cors_preflight_response()
@@ -138,7 +138,7 @@ def health_check():
 
 
 # ================= Login ด้วย username =================
-@app.route('/find_email_by_username', methods=['POST', 'OPTIONS'])
+@app.route('/find_email_by_username', methods=['POST'])
 def find_email_by_username():
     if request.method == "OPTIONS":
         return _build_cors_preflight_response()
@@ -162,7 +162,7 @@ def find_email_by_username():
 
 
 # ================= ลบผู้ใช้ =================
-@app.route('/delete_user', methods=['DELETE', 'OPTIONS'])
+@app.route('/delete_user', methods=['DELETE'])
 def delete_user():
     if request.method == "OPTIONS":
         return _build_cors_preflight_response()
