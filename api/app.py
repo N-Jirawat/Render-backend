@@ -168,7 +168,7 @@ def update_email():
             return jsonify({"error": "No JSON data received"}), 400
 
         uid = data.get("uid", "").strip()
-        new_email = data.get("email", "").strip()  # รับเป็น "email" ตาม frontend
+        new_email = data.get("email", "").strip() or data.get("new_email", "").strip() 
 
         # Debug logging
         logger.info(f"Received data: uid={uid}, email={new_email}")
