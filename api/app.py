@@ -85,7 +85,11 @@ def update_email():
         if not uid or not new_email:
             return jsonify({"error": "Missing uid or new_email"}), 400
 
-        # ตรวจสอบว่าอีเมลใหม่ไม่ซ้ำกับคนอื่น
+        # ตรวจสอบรูปแบบอีเมล
+        if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", new_email):
+            return jsonify({"error": "Invalid email format"}), 400
+
+        # ตรวจสอบว่าอีเมลใหม่ไม่ซ้ำกับผู้ใช้คนอื่น
         try:
             existing_user = auth.get_user_by_email(new_email)
             if existing_user.uid != uid:
@@ -95,7 +99,7 @@ def update_email():
 
         # อัปเดตใน Firebase Authentication
         try:
-            auth.update_user(
+            user = auth.update_user(
                 uid,
                 email=new_email,
                 email_verified=False
@@ -107,20 +111,33 @@ def update_email():
         # อัปเดตใน Firestore
         try:
             user_ref = db.collection("users").document(uid)
+            user_doc = user_ref.get()
+            if not user_doc.exists:
+                return jsonify({"error": "User document not found in Firestore"}), 404
             user_ref.update({"email": new_email})
             print(f"Updated Firestore email for user {uid}: {new_email}")
         except Exception as e:
             return jsonify({"error": f"Failed to update Firestore email: {str(e)}"}), 500
 
-        return jsonify({
-            "message": "Email updated successfully",
-            "updated_in": ["firebase_auth", "firestore"],
-            "new_email": new_email
-        }), 200
+        # สร้าง ID token ใหม่
+        try:
+            new_id_token = auth.create_custom_token(uid)
+            return jsonify({
+                "message": "Email updated successfully",
+                "updated_in": ["firebase_auth", "firestore"],
+                "new_email": new_email,
+                "id_token": new_id_token
+            }), 200
+        except Exception as e:
+            return jsonify({
+                "message": "Email updated successfully but failed to generate new ID token",
+                "updated_in": ["firebase_auth", "firestore"],
+                "new_email": new_email,
+                "error": str(e)
+            }), 200
 
     except Exception as e:
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
-
 
 # ================= Home =================
 @app.route('/', methods=['GET'])
