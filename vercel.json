@@ -1,9 +1,20 @@
 {
-  "version": 2,
-  "builds": [
-    { "src": "api/app.py", "use": "@vercel/python" }
-  ],
   "routes": [
-    { "src": "/(.*)", "dest": "api/app.py" }
+    {
+      "src": "/update_password",
+      "methods": ["OPTIONS"],
+      "headers": {
+        "Access-Control-Allow-Origin": "https://mangoleafanalyzer.onrender.com",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+      }
+    },
+    {
+      "src": "/update_password",
+      "methods": ["POST"],
+      "headers": {
+        "Access-Control-Allow-Origin": "https://mangoleafanalyzer.onrender.com"
+      }
+    }
   ]
 }
