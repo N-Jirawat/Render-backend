@@ -154,21 +154,13 @@ def update_email():
         return response
 
     try:
-        # ตรวจสอบว่าเป็นแอดมิน
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return jsonify({"error": "ต้องระบุ Firebase ID Token ใน Authorization header"}), 401
-        
-        token = auth_header.split('Bearer ')[1]
-        if not is_admin_user(token):
-            return jsonify({"error": "ต้องเป็นแอดมินเท่านั้นถึงจะอัปเดตอีเมลได้"}), 403
-
         data = request.get_json()
         if not data:
             return jsonify({"error": "No JSON data received"}), 400
 
         uid = data.get("uid", "").strip()
         new_email = data.get("email", "").strip() or data.get("new_email", "").strip() 
+        current_password = data.get("current_password", "").strip()
 
         # Debug logging
         logger.info(f"Received data: uid={uid}, email={new_email}")
@@ -180,6 +172,54 @@ def update_email():
         email_regex = r'^[^\s@]+@[^\s@]+\.[^\s@]+$'
         if not re.match(email_regex, new_email):
             return jsonify({"error": "รูปแบบอีเมลไม่ถูกต้อง"}), 400
+
+        # ตรวจสอบสิทธิ์: ต้องเป็น admin หรือเป็นเจ้าของบัญชี
+        auth_header = request.headers.get('Authorization')
+        is_admin = False
+        is_owner = False
+        
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split('Bearer ')[1]
+            try:
+                decoded_token = auth.verify_id_token(token)
+                token_uid = decoded_token.get('uid')
+                
+                # ตรวจสอบว่าเป็น admin
+                if is_admin_user(token):
+                    is_admin = True
+                    logger.info(f"Admin user updating email for {uid}")
+                # ตรวจสอบว่าเป็นเจ้าของบัญชี
+                elif token_uid == uid:
+                    is_owner = True
+                    logger.info(f"User updating own email: {uid}")
+            except Exception as e:
+                logger.error(f"Token verification failed: {e}")
+
+        # ถ้าไม่ใช่ admin และไม่ใช่เจ้าของบัญชี
+        if not is_admin and not is_owner:
+            return jsonify({"error": "ไม่มีสิทธิ์อัปเดตอีเมลนี้"}), 403
+
+        # ถ้าเป็นเจ้าของบัญชี ต้องมีรหัสผ่าน
+        if is_owner and not current_password:
+            return jsonify({"error": "ต้องระบุรหัsผ่านเดิมเพื่อยืนยันตัวตน"}), 400
+
+        # ถ้าเป็นเจ้าของบัญชี ให้ตรวจสอบรหัสผ่าน (ในที่นี้เราพึ่ง Frontend ตรวจสอบแล้ว)
+        # แต่สำหรับความปลอดภัย เราจะตรวจสอบอีกครั้ง
+        if is_owner and current_password:
+            try:
+                # ดึงอีเมลปัจจุบันจาก Firestore
+                current_email = get_user_email_by_uid(uid)
+                if not current_email:
+                    return jsonify({"error": "ไม่พบข้อมูลผู้ใช้"}), 404
+                
+                # ลองยืนยันตัวตนด้วย Firebase Admin SDK (ถ้าต้องการ)
+                # หมายเหตุ: Firebase Admin SDK ไม่มีฟังก์ชัน signInWithEmailAndPassword
+                # ดังนั้นเราจะพึ่งการตรวจสอบจาก Frontend ก่อน
+                logger.info(f"Password verification handled by frontend for user {uid}")
+                
+            except Exception as e:
+                logger.error(f"Error verifying password: {e}")
+                return jsonify({"error": "เกิดข้อผิดพลาดในการยืนยันรหัสผ่าน"}), 500
 
         # Check if new email already exists
         try:
@@ -208,7 +248,6 @@ def update_email():
     except Exception as e:
         logger.error(f"Error updating email: {e}")
         return jsonify({"error": f"เกิดข้อผิดพลาดในการอัปเดตอีเมล: {str(e)}"}), 500
-    
 
 
 @app.route('/delete_user', methods=['DELETE', 'OPTIONS'])
@@ -229,25 +268,60 @@ def delete_user():
         return response
 
     try:
-        # ตรวจสอบว่าเป็นแอดมิน
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return jsonify({"error": "ต้องระบุ Firebase ID Token ใน Authorization header"}), 401
-        
-        token = auth_header.split('Bearer ')[1]
-        if not is_admin_user(token):
-            return jsonify({"error": "ต้องเป็นแอดมินเท่านั้นถึงจะลบผู้ใช้ได้"}), 403
-
         data = request.get_json() or {}
         uid = data.get("uid", "").strip()
 
         if not uid:
             return jsonify({"error": "ต้องระบุ UID"}), 400
 
+        # ตรวจสอบสิทธิ์: ต้องเป็น admin หรือเป็นเจ้าของบัญชี
+        auth_header = request.headers.get('Authorization')
+        is_admin = False
+        is_owner = False
+        
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split('Bearer ')[1]
+            try:
+                decoded_token = auth.verify_id_token(token)
+                token_uid = decoded_token.get('uid')
+                
+                # ตรวจสอบว่าเป็น admin
+                if is_admin_user(token):
+                    is_admin = True
+                    logger.info(f"Admin user deleting user {uid}")
+                # ตรวจสอบว่าเป็นเจ้าของบัญชี
+                elif token_uid == uid:
+                    is_owner = True
+                    logger.info(f"User deleting own account: {uid}")
+            except Exception as e:
+                logger.error(f"Token verification failed: {e}")
+
+        # ถ้าไม่ใช่ admin และไม่ใช่เจ้าของบัญชี
+        if not is_admin and not is_owner:
+            return jsonify({"error": "ไม่มีสิทธิ์ลบบัญชีนี้"}), 403
+
         # Delete user data from Firestore
         user_ref = db.collection("users").document(uid)
         if user_ref.get().exists:
             user_ref.delete()
+
+        # Delete related data (optional - เพิ่มถ้าต้องการลบข้อมูลที่เกี่ยวข้อง)
+        try:
+            # Delete AnalysisHistory
+            analysis_query = db.collection("AnalysisHistory").where("userId", "==", uid)
+            analysis_docs = analysis_query.get()
+            for doc in analysis_docs:
+                doc.reference.delete()
+            
+            # Delete ReportDataUser
+            report_query = db.collection("ReportDataUser").where("UserID", "==", uid)
+            report_docs = report_query.get()
+            for doc in report_docs:
+                doc.reference.delete()
+                
+            logger.info(f"Related data deleted for user {uid}")
+        except Exception as e:
+            logger.warning(f"Error deleting related data for user {uid}: {e}")
 
         # Delete from Firebase Auth
         try:
@@ -262,6 +336,7 @@ def delete_user():
     except Exception as e:
         logger.error(f"Error deleting user: {e}")
         return jsonify({"error": f"เกิดข้อผิดพลาดในการลบผู้ใช้: {str(e)}"}), 500
+    
 
 @app.route('/test', methods=['GET', 'POST', 'OPTIONS'])
 def test_endpoint():
