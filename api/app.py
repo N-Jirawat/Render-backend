@@ -4,6 +4,7 @@ from firebase_admin import credentials, auth, firestore
 from flask_cors import CORS
 import os
 import json
+import re
 
 app = Flask(__name__)
 
@@ -85,11 +86,7 @@ def update_email():
         if not uid or not new_email:
             return jsonify({"error": "Missing uid or new_email"}), 400
 
-        # ตรวจสอบรูปแบบอีเมล
-        if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", new_email):
-            return jsonify({"error": "Invalid email format"}), 400
-
-        # ตรวจสอบว่าอีเมลใหม่ไม่ซ้ำกับผู้ใช้คนอื่น
+        # ตรวจสอบว่าอีเมลใหม่ไม่ซ้ำกับคนอื่น
         try:
             existing_user = auth.get_user_by_email(new_email)
             if existing_user.uid != uid:
@@ -99,7 +96,7 @@ def update_email():
 
         # อัปเดตใน Firebase Authentication
         try:
-            user = auth.update_user(
+            auth.update_user(
                 uid,
                 email=new_email,
                 email_verified=False
@@ -111,33 +108,67 @@ def update_email():
         # อัปเดตใน Firestore
         try:
             user_ref = db.collection("users").document(uid)
-            user_doc = user_ref.get()
-            if not user_doc.exists:
-                return jsonify({"error": "User document not found in Firestore"}), 404
             user_ref.update({"email": new_email})
             print(f"Updated Firestore email for user {uid}: {new_email}")
         except Exception as e:
             return jsonify({"error": f"Failed to update Firestore email: {str(e)}"}), 500
 
-        # สร้าง ID token ใหม่
+        return jsonify({
+            "message": "Email updated successfully",
+            "updated_in": ["firebase_auth", "firestore"],
+            "new_email": new_email
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+# ================= อัปเดตรหัสผ่าน =================
+@app.route('/update_password', methods=['POST'])
+def update_password():
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
+    try:
+        data = request.get_json()
+        uid = data.get("uid")
+        new_password = data.get("new_password")
+
+        if not uid or not new_password:
+            return jsonify({"error": "Missing uid or new_password"}), 400
+
+        # ตรวจสอบความแข็งแรงของรหัสผ่าน
+        if len(new_password) < 6:
+            return jsonify({"error": "Password must be at least 6 characters"}), 400
+
+        # อัปเดตใน Firebase Authentication
+        try:
+            user = auth.update_user(
+                uid,
+                password=new_password
+            )
+            print(f"Updated Firebase Auth password for user {uid}")
+        except Exception as e:
+            return jsonify({"error": f"Failed to update Firebase Auth password: {str(e)}"}), 500
+
+        # สร้าง Custom Token ใหม่
         try:
             new_id_token = auth.create_custom_token(uid)
             return jsonify({
-                "message": "Email updated successfully",
-                "updated_in": ["firebase_auth", "firestore"],
-                "new_email": new_email,
-                "id_token": new_id_token
+                "message": "Password updated successfully",
+                "updated_in": ["firebase_auth"],
+                "id_token": new_id_token.decode("utf-8") if isinstance(new_id_token, bytes) else str(new_id_token)
             }), 200
         except Exception as e:
             return jsonify({
-                "message": "Email updated successfully but failed to generate new ID token",
-                "updated_in": ["firebase_auth", "firestore"],
-                "new_email": new_email,
+                "message": "Password updated successfully but failed to generate new ID token",
+                "updated_in": ["firebase_auth"],
                 "error": str(e)
             }), 200
 
     except Exception as e:
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+    
+    
 
 # ================= Home =================
 @app.route('/', methods=['GET'])
