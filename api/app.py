@@ -134,6 +134,7 @@ def health_check():
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return jsonify({"status": "unhealthy", "error": str(e)}), 500
+    
 
 @app.route('/update_email', methods=['POST', 'OPTIONS'])
 def update_email():
@@ -167,7 +168,10 @@ def update_email():
             return jsonify({"error": "No JSON data received"}), 400
 
         uid = data.get("uid", "").strip()
-        new_email = data.get("email", "").strip()  # เปลี่ยนชื่อ key เป็น email เพื่อให้สอดคล้องกับ frontend
+        new_email = data.get("email", "").strip()  # รับเป็น "email" ตาม frontend
+
+        # Debug logging
+        logger.info(f"Received data: uid={uid}, email={new_email}")
 
         if not uid or not new_email:
             return jsonify({"error": "ต้องระบุ UID และอีเมลใหม่"}), 400
@@ -204,6 +208,8 @@ def update_email():
     except Exception as e:
         logger.error(f"Error updating email: {e}")
         return jsonify({"error": f"เกิดข้อผิดพลาดในการอัปเดตอีเมล: {str(e)}"}), 500
+    
+
 
 @app.route('/delete_user', methods=['DELETE', 'OPTIONS'])
 def delete_user():
