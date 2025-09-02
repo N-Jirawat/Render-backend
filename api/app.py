@@ -9,6 +9,14 @@ import requests
 
 app = Flask(__name__)
 
+# ✅ Configure CORS properly
+CORS(app, 
+     origins=["https://mangoleafanalyzer.onrender.com", "http://localhost:3000", "https://localhost:3000"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization"],
+     supports_credentials=True
+)
+
 # ✅ เปิด CORS ครอบคลุมทุกเส้นทาง และรองรับ OPTIONS preflight
 def _build_cors_preflight_response():
     response = jsonify({"status": "preflight ok"})
@@ -29,7 +37,7 @@ def _build_cors_preflight_response():
     response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
     response.headers.add("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
     response.headers.add("Access-Control-Allow-Credentials", "true")
-    return response, 200  # ต้องมี status 200
+    return response
 
 # Initialize Firebase Admin SDK
 if not firebase_admin._apps:
@@ -46,7 +54,7 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-# เพิ่มที่ด้านบนของไฟล์
+# ✅ Additional CORS handler for all responses
 @app.after_request
 def after_request(response):
     origin = request.headers.get('Origin')
