@@ -5,14 +5,31 @@ from flask_cors import CORS
 import os
 import json
 import re
+import requests
 
 app = Flask(__name__)
 
 # ✅ เปิด CORS ครอบคลุมทุกเส้นทาง และรองรับ OPTIONS preflight
-CORS(app, resources={r"/*": {"origins": [
-    "https://mangoleafanalyzer.onrender.com",
-    "http://localhost:3000"
-]}}, supports_credentials=True)
+def _build_cors_preflight_response():
+    response = jsonify({"status": "preflight ok"})
+    
+    # รองรับหลาย origin
+    origin = request.headers.get('Origin')
+    allowed_origins = [
+        "https://mangoleafanalyzer.onrender.com",
+        "http://localhost:3000",
+        "https://localhost:3000"
+    ]
+    
+    if origin in allowed_origins:
+        response.headers.add("Access-Control-Allow-Origin", origin)
+    else:
+        response.headers.add("Access-Control-Allow-Origin", "https://mangoleafanalyzer.onrender.com")
+        
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+    response.headers.add("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+    response.headers.add("Access-Control-Allow-Credentials", "true")
+    return response, 200  # ต้องมี status 200
 
 # Initialize Firebase Admin SDK
 if not firebase_admin._apps:
@@ -28,6 +45,48 @@ if not firebase_admin._apps:
         print(f"Error initializing Firebase: {e}")
 
 db = firestore.client()
+
+# ================= Helper Function: Verify Password =================
+def verify_password(email, password):
+    """
+    Verify user password by attempting to sign in with Firebase Auth REST API
+    Returns True if password is correct, False otherwise
+    """
+    try:
+        # Get Firebase Web API Key (you need to set this in environment variables)
+        api_key = os.environ.get("FIREBASE_WEB_API_KEY")
+        if not api_key:
+            print("Warning: FIREBASE_WEB_API_KEY not set. Password verification will be skipped.")
+            return True  # Skip verification if API key not available
+        
+        # Firebase Auth REST API endpoint
+        url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={api_key}"
+        
+        payload = {
+            "email": email,
+            "password": password,
+            "returnSecureToken": True
+        }
+        
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            return True
+        else:
+            error_data = response.json()
+            error_message = error_data.get("error", {}).get("message", "Unknown error")
+            print(f"Password verification failed: {error_message}")
+            return False
+            
+    except requests.exceptions.Timeout:
+        print("Password verification timeout")
+        return False
+    except requests.exceptions.RequestException as e:
+        print(f"Password verification request error: {str(e)}")
+        return False
+    except Exception as e:
+        print(f"Password verification error: {str(e)}")
+        return False
 
 # ================= ตรวจสอบ username =================
 @app.route('/check_username', methods=['POST'])
@@ -73,6 +132,46 @@ def check_email():
         return jsonify({"error": str(e)}), 500
 
 
+# ================= ตรวจสอบรหัสผ่าน =================
+@app.route('/verify_password', methods=['POST'])
+def verify_password_endpoint():
+    if request.method == "OPTIONS":
+        return _build_cors_preflight_response()
+    try:
+        data = request.get_json()
+        uid = data.get("uid")
+        password = data.get("password")
+        
+        if not uid or not password:
+            return jsonify({"error": "Missing uid or password"}), 400
+
+        # Get user email from Firestore
+        try:
+            user_ref = db.collection("users").document(uid)
+            user_doc = user_ref.get()
+            if not user_doc.exists:
+                return jsonify({"error": "User not found in database"}), 404
+            
+            user_data = user_doc.to_dict()
+            email = user_data.get("email")
+            if not email:
+                return jsonify({"error": "User email not found"}), 404
+                
+        except Exception as e:
+            return jsonify({"error": f"Failed to get user data: {str(e)}"}), 500
+
+        # Verify password
+        is_valid = verify_password(email, password)
+        
+        if is_valid:
+            return jsonify({"valid": True, "message": "Password is correct"}), 200
+        else:
+            return jsonify({"valid": False, "message": "Invalid password"}), 401
+
+    except Exception as e:
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
 # ================= อัปเดตอีเมล =================
 @app.route('/update_email', methods=['POST'])
 def update_email():
@@ -82,9 +181,29 @@ def update_email():
         data = request.get_json()
         uid = data.get("uid")
         new_email = data.get("new_email")
+        current_password = data.get("current_password")
         
         if not uid or not new_email:
             return jsonify({"error": "Missing uid or new_email"}), 400
+
+        # Get current user data
+        try:
+            user_ref = db.collection("users").document(uid)
+            user_doc = user_ref.get()
+            if not user_doc.exists:
+                return jsonify({"error": "User not found"}), 404
+            
+            user_data = user_doc.to_dict()
+            current_email = user_data.get("email")
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to get user data: {str(e)}"}), 500
+
+        # Verify current password if provided
+        if current_password:
+            is_valid = verify_password(current_email, current_password)
+            if not is_valid:
+                return jsonify({"error": "Current password is incorrect"}), 401
 
         # ตรวจสอบว่าอีเมลใหม่ไม่ซ้ำกับคนอื่น
         try:
@@ -107,7 +226,6 @@ def update_email():
 
         # อัปเดตใน Firestore
         try:
-            user_ref = db.collection("users").document(uid)
             user_ref.update({"email": new_email})
             print(f"Updated Firestore email for user {uid}: {new_email}")
         except Exception as e:
@@ -132,13 +250,41 @@ def update_password():
         data = request.get_json()
         uid = data.get("uid")
         new_password = data.get("new_password")
+        current_password = data.get("current_password")
 
         if not uid or not new_password:
             return jsonify({"error": "Missing uid or new_password"}), 400
 
+        if not current_password:
+            return jsonify({"error": "Current password is required for verification"}), 400
+
+        # Get user data from Firestore
+        try:
+            user_ref = db.collection("users").document(uid)
+            user_doc = user_ref.get()
+            if not user_doc.exists:
+                return jsonify({"error": "User not found"}), 404
+            
+            user_data = user_doc.to_dict()
+            email = user_data.get("email")
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to get user data: {str(e)}"}), 500
+
+        # Verify current password
+        is_valid = verify_password(email, current_password)
+        if not is_valid:
+            return jsonify({"error": "Current password is incorrect"}), 401
+
         # ตรวจสอบความแข็งแรงของรหัสผ่าน
-        if len(new_password) < 6:
-            return jsonify({"error": "Password must be at least 6 characters"}), 400
+        if len(new_password) < 8:
+            return jsonify({"error": "Password must be at least 8 characters"}), 400
+        
+        if not re.search(r'[a-zA-Z]', new_password):
+            return jsonify({"error": "Password must contain at least one letter"}), 400
+            
+        if not re.search(r'[0-9]', new_password):
+            return jsonify({"error": "Password must contain at least one number"}), 400
 
         # อัปเดตใน Firebase Authentication
         try:
@@ -168,7 +314,7 @@ def update_password():
     except Exception as e:
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
     
-    
+
 
 # ================= Home =================
 @app.route('/', methods=['GET'])
@@ -217,8 +363,25 @@ def delete_user():
     try:
         data = request.get_json()
         uid = data.get("uid") if data else None
+        current_password = data.get("current_password") if data else None
+        
         if not uid:
             return jsonify({"error": "Missing uid parameter"}), 400
+
+        # Verify password before deletion
+        if current_password:
+            try:
+                user_ref = db.collection("users").document(uid)
+                user_doc = user_ref.get()
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
+                    email = user_data.get("email")
+                    if email:
+                        is_valid = verify_password(email, current_password)
+                        if not is_valid:
+                            return jsonify({"error": "Current password is incorrect"}), 401
+            except Exception as e:
+                return jsonify({"error": f"Password verification failed: {str(e)}"}), 500
 
         # ลบจาก Firestore
         try:
