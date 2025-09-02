@@ -84,9 +84,8 @@ def verify_password(email, password):
         # Get Firebase Web API Key (you need to set this in environment variables)
         api_key = os.environ.get("FIREBASE_WEB_API_KEY")
         if not api_key:
-            print("Warning: FIREBASE_WEB_API_KEY not set. Password verification will be skipped.")
-            return True  # Skip verification if API key not available
-        
+            return False  # ดีกว่าการ return True
+
         # Firebase Auth REST API endpoint
         url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={api_key}"
         
