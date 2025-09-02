@@ -14,31 +14,45 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ================== CORS - Simplified for Vercel ==================
+# ================== CORS - แก้ไขให้รองรับ localhost development ==================
 CORS(app, 
-     origins="*",  # เปิดทั้หมดเพื่อหลีกเลี่ยงปัญหา Vercel
+     origins=[
+         "http://localhost:3000",  # สำหรับ development
+         "https://your-frontend-domain.vercel.app",  # สำหรับ production (เปลี่ยนเป็น domain จริงของคุณ)
+         "*"  # fallback (ใช้เฉพาะเมื่อจำเป็น)
+     ],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Content-Type", "Authorization", "Access-Control-Allow-Origin"],
-     supports_credentials=False  # ปิด credentials เพื่อหลีกเลี่ยงปัญหา
+     supports_credentials=False
 )
 
-# แก้ไข CORS Headers แบบง่าย
+# แก้ไข CORS Headers - เพิ่มการจัดการ preflight requests
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    origin = request.headers.get('Origin')
+    if origin:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+    else:
+        response.headers.add('Access-Control-Allow-Origin', '*')
+    
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept')
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
-    response.headers.add('Access-Control-Max-Age', '86400')  # Cache preflight 24 hours
+    response.headers.add('Access-Control-Max-Age', '3600')
     return response
 
-# Handle preflight requests แบบง่าย
+# Handle preflight requests อย่างชัดเจน
 @app.before_request
 def handle_preflight():
     if request.method == "OPTIONS":
         response = jsonify({'status': 'ok'})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization")
+        origin = request.headers.get('Origin')
+        if origin:
+            response.headers.add("Access-Control-Allow-Origin", origin)
+        else:
+            response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,Accept")
         response.headers.add('Access-Control-Allow-Methods', "GET,POST,PUT,DELETE,OPTIONS")
+        response.headers.add('Access-Control-Max-Age', '3600')
         return response
 
 # ================== Firebase ==================
@@ -75,43 +89,42 @@ def verify_password_simple(email, password):
         api_key = os.environ.get("FIREBASE_WEB_API_KEY")
         if not api_key:
             logger.warning("Firebase Web API Key not found, skipping password verification")
-            return True  # Skip verification if no API key
+            return True
 
         url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={api_key}"
         payload = {"email": email, "password": password, "returnSecureToken": True}
         
         # เพิ่ม timeout และ retry logic
-        for attempt in range(2):  # Try 2 times
+        for attempt in range(2):
             try:
-                response = requests.post(url, json=payload, timeout=10)
+                response = requests.post(url, json=payload, timeout=15)
                 if response.status_code == 200:
                     return True
                 elif response.status_code == 400:
-                    # Invalid password
                     return False
                 else:
                     logger.warning(f"Password verification attempt {attempt + 1} failed with status {response.status_code}")
                     if attempt == 0:
-                        continue  # Try again
+                        continue
                     else:
-                        return False  # Skip verification on final attempt
+                        return False
             except requests.exceptions.Timeout:
                 logger.warning(f"Password verification timeout on attempt {attempt + 1}")
                 if attempt == 0:
                     continue
                 else:
-                    return True  # Skip verification on timeout
+                    return True
             except Exception as e:
                 logger.warning(f"Password verification error on attempt {attempt + 1}: {e}")
                 if attempt == 0:
                     continue
                 else:
-                    return True  # Skip verification on error
+                    return True
         
         return False
     except Exception as e:
         logger.error(f"Password verification error: {str(e)}")
-        return True  # Skip verification on error
+        return True
 
 def validate_password_strength(password):
     """Validate password strength"""
@@ -130,13 +143,15 @@ def home():
     return jsonify({
         "message": "Mango User Management API", 
         "status": "running", 
-        "version": "1.2.0",
+        "version": "1.3.0",
         "server": "Vercel",
+        "cors_enabled": True,
         "endpoints": {
             "health": "/health",
             "update_password": "/update_password",
             "update_email": "/update_email",
-            "delete_user": "/delete_user"
+            "delete_user": "/delete_user",
+            "test": "/test"
         }
     })
 
@@ -148,48 +163,110 @@ def health_check():
             "status": "healthy",
             "service": "user_management",
             "firebase_initialized": firebase_status,
-            "server": "Vercel"
+            "server": "Vercel",
+            "cors_enabled": True
         })
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return jsonify({"status": "unhealthy", "error": str(e)}), 500
 
-# ----- Verify password -----
-@app.route('/verify_password', methods=['POST', 'OPTIONS'])
-def verify_password_endpoint():
+# ----- Update password -----
+@app.route('/update_password', methods=['POST', 'OPTIONS'])
+def update_password():
+    # Handle preflight explicitly
     if request.method == 'OPTIONS':
-        return '', 200
+        response = jsonify({'status': 'preflight_ok'})
+        origin = request.headers.get('Origin')
+        if origin:
+            response.headers.add("Access-Control-Allow-Origin", origin)
+        else:
+            response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,Accept")
+        response.headers.add('Access-Control-Allow-Methods', "POST,OPTIONS")
+        response.headers.add('Access-Control-Max-Age', '3600')
+        return response
         
     try:
+        logger.info("Password update request received")
+        
+        # ตรวจสอบ Content-Type
+        if not request.is_json:
+            logger.error("Request is not JSON")
+            return jsonify({"error": "Content-Type must be application/json"}), 400
+        
         data = request.get_json()
         if not data:
+            logger.error("No JSON data received")
             return jsonify({"error": "No JSON data received"}), 400
             
         uid = data.get("uid", "").strip()
-        password = data.get("password", "")
-        
-        if not uid or not password:
-            return jsonify({"error": "UID และรหัสผ่านจำเป็นต้องระบุ"}), 400
+        new_password = data.get("new_password", "")
+        current_password = data.get("current_password", "")
 
+        logger.info(f"Processing password update for user: {uid}")
+
+        if not uid or not new_password or not current_password:
+            return jsonify({"error": "UID, รหัสผ่านเดิม และรหัสผ่านใหม่จำเป็นต้องระบุ"}), 400
+
+        # Get user email
         email = get_user_email_by_uid(uid)
         if not email:
             return jsonify({"error": "ไม่พบข้อมูลผู้ใช้"}), 404
 
-        is_valid = verify_password_simple(email, password)
-        if is_valid:
-            return jsonify({"valid": True, "message": "รหัสผ่านถูกต้อง"})
-        else:
-            return jsonify({"valid": False, "message": "รหัสผ่านไม่ถูกต้อง"}), 401
-            
+        logger.info(f"Found user email: {email}")
+
+        # Verify current password
+        password_valid = verify_password_simple(email, current_password)
+        if not password_valid:
+            return jsonify({"error": "รหัสผ่านเดิมไม่ถูกต้อง"}), 401
+
+        # Validate new password strength
+        password_errors = validate_password_strength(new_password)
+        if password_errors:
+            return jsonify({"error": "; ".join(password_errors)}), 400
+
+        # Update password in Firebase Auth
+        try:
+            auth.update_user(uid, password=new_password)
+            logger.info(f"Password updated in Firebase Auth for user: {uid}")
+        except Exception as e:
+            logger.error(f"Error updating password in Firebase Auth: {e}")
+            return jsonify({"error": "เกิดข้อผิดพลาดในการอัปเดตรหัสผ่าน"}), 500
+        
+        # Create new custom token for re-authentication
+        try:
+            new_id_token = auth.create_custom_token(uid)
+            token_string = new_id_token.decode("utf-8") if isinstance(new_id_token, bytes) else str(new_id_token)
+            logger.info(f"Custom token created for user: {uid}")
+        except Exception as e:
+            logger.error(f"Error creating custom token: {e}")
+            token_string = None
+        
+        logger.info(f"Password updated successfully for user {uid}")
+        
+        return jsonify({
+            "message": "รหัสผ่านอัปเดตเรียบร้อยแล้ว",
+            "id_token": token_string,
+            "success": True
+        })
+        
     except Exception as e:
-        logger.error(f"Error verifying password: {e}")
-        return jsonify({"error": "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"}), 500
+        logger.error(f"Error updating password: {e}")
+        return jsonify({"error": f"เกิดข้อผิดพลาดในการอัปเดตรหัสผ่าน: {str(e)}"}), 500
 
 # ----- Update email -----
 @app.route('/update_email', methods=['POST', 'OPTIONS'])
 def update_email():
     if request.method == 'OPTIONS':
-        return '', 200
+        response = jsonify({'status': 'preflight_ok'})
+        origin = request.headers.get('Origin')
+        if origin:
+            response.headers.add("Access-Control-Allow-Origin", origin)
+        else:
+            response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,Accept")
+        response.headers.add('Access-Control-Allow-Methods', "POST,OPTIONS")
+        return response
         
     try:
         data = request.get_json()
@@ -242,80 +319,19 @@ def update_email():
         logger.error(f"Error updating email: {e}")
         return jsonify({"error": "เกิดข้อผิดพลาดในการอัปเดตอีเมล"}), 500
 
-# ----- Update password -----
-@app.route('/update_password', methods=['POST', 'OPTIONS'])
-def update_password():
-    if request.method == 'OPTIONS':
-        return '', 200
-        
-    try:
-        logger.info("Password update request received")
-        
-        data = request.get_json()
-        if not data:
-            logger.error("No JSON data received")
-            return jsonify({"error": "No JSON data received"}), 400
-            
-        uid = data.get("uid", "").strip()
-        new_password = data.get("new_password", "")
-        current_password = data.get("current_password", "")
-
-        logger.info(f"Processing password update for user: {uid}")
-
-        if not uid or not new_password or not current_password:
-            return jsonify({"error": "UID, รหัสผ่านเดิม และรหัสผ่านใหม่จำเป็นต้องระบุ"}), 400
-
-        # Get user email
-        email = get_user_email_by_uid(uid)
-        if not email:
-            return jsonify({"error": "ไม่พบข้อมูลผู้ใช้"}), 404
-
-        logger.info(f"Found user email: {email}")
-
-        # Verify current password (with fallback)
-        password_valid = verify_password_simple(email, current_password)
-        if not password_valid:
-            return jsonify({"error": "รหัสผ่านเดิมไม่ถูกต้อง"}), 401
-
-        # Validate new password strength
-        password_errors = validate_password_strength(new_password)
-        if password_errors:
-            return jsonify({"error": "; ".join(password_errors)}), 400
-
-        # Update password in Firebase Auth
-        try:
-            auth.update_user(uid, password=new_password)
-            logger.info(f"Password updated in Firebase Auth for user: {uid}")
-        except Exception as e:
-            logger.error(f"Error updating password in Firebase Auth: {e}")
-            return jsonify({"error": "เกิดข้อผิดพลาดในการอัปเดตรหัสผ่าน"}), 500
-        
-        # Create new custom token for re-authentication
-        try:
-            new_id_token = auth.create_custom_token(uid)
-            token_string = new_id_token.decode("utf-8") if isinstance(new_id_token, bytes) else str(new_id_token)
-            logger.info(f"Custom token created for user: {uid}")
-        except Exception as e:
-            logger.error(f"Error creating custom token: {e}")
-            token_string = None
-        
-        logger.info(f"Password updated successfully for user {uid}")
-        
-        return jsonify({
-            "message": "รหัสผ่านอัปเดตเรียบร้อยแล้ว",
-            "id_token": token_string,
-            "success": True
-        })
-        
-    except Exception as e:
-        logger.error(f"Error updating password: {e}")
-        return jsonify({"error": f"เกิดข้อผิดพลาดในการอัปเดตรหัสผ่าน: {str(e)}"}), 500
-
 # ----- Delete user -----
 @app.route('/delete_user', methods=['DELETE', 'OPTIONS'])
 def delete_user():
     if request.method == 'OPTIONS':
-        return '', 200
+        response = jsonify({'status': 'preflight_ok'})
+        origin = request.headers.get('Origin')
+        if origin:
+            response.headers.add("Access-Control-Allow-Origin", origin)
+        else:
+            response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,Accept")
+        response.headers.add('Access-Control-Allow-Methods', "DELETE,OPTIONS")
+        return response
         
     try:
         data = request.get_json() or {}
@@ -323,13 +339,6 @@ def delete_user():
         
         if not uid:
             return jsonify({"error": "UID is required"}), 400
-
-        # Skip password verification for now due to CORS issues
-        # current_password = data.get("current_password")
-        # if current_password:
-        #     email = get_user_email_by_uid(uid)
-        #     if email and not verify_password_simple(email, current_password):
-        #         return jsonify({"error": "รหัสผ่านไม่ถูกต้อง"}), 401
 
         # Delete user data from Firestore
         user_ref = db.collection("users").document(uid)
@@ -340,7 +349,7 @@ def delete_user():
         try:
             auth.delete_user(uid)
         except auth.UserNotFoundError:
-            pass  # User already deleted
+            pass
 
         logger.info(f"User deleted successfully: {uid}")
         
@@ -354,24 +363,81 @@ def delete_user():
 @app.route('/test', methods=['GET', 'POST', 'OPTIONS'])
 def test_endpoint():
     if request.method == 'OPTIONS':
-        return '', 200
+        response = jsonify({'status': 'preflight_ok'})
+        origin = request.headers.get('Origin')
+        if origin:
+            response.headers.add("Access-Control-Allow-Origin", origin)
+        else:
+            response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,Accept")
+        response.headers.add('Access-Control-Allow-Methods', "GET,POST,OPTIONS")
+        return response
         
     return jsonify({
         "message": "Test endpoint working",
         "method": request.method,
         "timestamp": "2024",
-        "server": "Vercel"
+        "server": "Vercel",
+        "cors_working": True,
+        "origin": request.headers.get('Origin', 'No origin header')
     })
+
+# ----- Verify password endpoint -----
+@app.route('/verify_password', methods=['POST', 'OPTIONS'])
+def verify_password_endpoint():
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'preflight_ok'})
+        origin = request.headers.get('Origin')
+        if origin:
+            response.headers.add("Access-Control-Allow-Origin", origin)
+        else:
+            response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,Accept")
+        response.headers.add('Access-Control-Allow-Methods', "POST,OPTIONS")
+        return response
+        
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data received"}), 400
+            
+        uid = data.get("uid", "").strip()
+        password = data.get("password", "")
+        
+        if not uid or not password:
+            return jsonify({"error": "UID และรหัสผ่านจำเป็นต้องระบุ"}), 400
+
+        email = get_user_email_by_uid(uid)
+        if not email:
+            return jsonify({"error": "ไม่พบข้อมูลผู้ใช้"}), 404
+
+        is_valid = verify_password_simple(email, password)
+        if is_valid:
+            return jsonify({"valid": True, "message": "รหัสผ่านถูกต้อง"})
+        else:
+            return jsonify({"valid": False, "message": "รหัสผ่านไม่ถูกต้อง"}), 401
+            
+    except Exception as e:
+        logger.error(f"Error verifying password: {e}")
+        return jsonify({"error": "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์"}), 500
 
 # ================== Error Handlers ==================
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify({"error": "Endpoint not found"}), 404
+    response = jsonify({"error": "Endpoint not found"})
+    origin = request.headers.get('Origin')
+    if origin:
+        response.headers.add("Access-Control-Allow-Origin", origin)
+    return response, 404
 
 @app.errorhandler(500)
 def internal_error(error):
     logger.error(f"Internal server error: {error}")
-    return jsonify({"error": "Internal server error"}), 500
+    response = jsonify({"error": "Internal server error"})
+    origin = request.headers.get('Origin')
+    if origin:
+        response.headers.add("Access-Control-Allow-Origin", origin)
+    return response, 500
 
 # ================== Main ==================
 if __name__ == '__main__':
