@@ -133,7 +133,7 @@ def check_email():
 
 
 # ================= ตรวจสอบรหัสผ่าน =================
-@app.route('/verify_password', methods=['POST'])
+@app.route('/verify_password', methods=['POST', 'OPTIONS'])
 def verify_password_endpoint():
     if request.method == "OPTIONS":
         return _build_cors_preflight_response()
@@ -422,14 +422,7 @@ def test_firebase():
         return jsonify({"error": f"Firebase connection failed: {str(e)}"}), 500
 
 
-# ================= Helper: Preflight response =================
-def _build_cors_preflight_response():
-    response = jsonify({"status": "preflight ok"})
-    response.headers.add("Access-Control-Allow-Origin", "https://mangoleafanalyzer.onrender.com")
-    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
-    response.headers.add("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-    response.headers.add("Access-Control-Allow-Credentials", "true")
-    return response
+# ================= Helper: Preflight response (ลบฟังก์ชันซ้ำ) =================
 
 
 if __name__ == '__main__':
