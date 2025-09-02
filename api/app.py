@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 CORS(app, 
      origins=[
          "http://localhost:3000",  # สำหรับ development
-         "https://your-frontend-domain.vercel.app",  # แก้เป็น domain จริงของคุณ
          "https://mangoleafanalyzer.onrender.com",  # เพิ่ม domain อื่นถ้ามี
      ],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -31,7 +30,6 @@ def after_request(response):
     origin = request.headers.get('Origin')
     allowed_origins = [
         "http://localhost:3000",
-        "https://your-frontend-domain.vercel.app",
         "https://mangoleafanalyzer.onrender.com",
     ]
     if origin in allowed_origins:
@@ -51,7 +49,6 @@ def handle_preflight():
         origin = request.headers.get('Origin')
         allowed_origins = [
             "http://localhost:3000",
-            "https://your-frontend-domain.vercel.app",
             "https://mangoleafanalyzer.onrender.com",
         ]
         if origin in allowed_origins:
@@ -145,7 +142,6 @@ def update_email():
         origin = request.headers.get('Origin')
         allowed_origins = [
             "http://localhost:3000",
-            "https://your-frontend-domain.vercel.app",
             "https://mangoleafanalyzer.onrender.com",
         ]
         if origin in allowed_origins:
@@ -216,7 +212,6 @@ def delete_user():
         origin = request.headers.get('Origin')
         allowed_origins = [
             "http://localhost:3000",
-            "https://your-frontend-domain.vercel.app",
             "https://mangoleafanalyzer.onrender.com",
         ]
         if origin in allowed_origins:
@@ -269,7 +264,6 @@ def test_endpoint():
         origin = request.headers.get('Origin')
         allowed_origins = [
             "http://localhost:3000",
-            "https://your-frontend-domain.vercel.app",
             "https://mangoleafanalyzer.onrender.com",
         ]
         if origin in allowed_origins:
@@ -296,7 +290,6 @@ def not_found(error):
     origin = request.headers.get('Origin')
     allowed_origins = [
         "http://localhost:3000",
-        "https://your-frontend-domain.vercel.app",
         "https://mangoleafanalyzer.onrender.com",
     ]
     if origin in allowed_origins:
@@ -310,7 +303,6 @@ def internal_error(error):
     origin = request.headers.get('Origin')
     allowed_origins = [
         "http://localhost:3000",
-        "https://your-frontend-domain.vercel.app",
         "https://mangoleafanalyzer.onrender.com",
     ]
     if origin in allowed_origins:
