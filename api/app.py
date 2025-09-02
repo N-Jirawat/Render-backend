@@ -46,6 +46,26 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
+# เพิ่มที่ด้านบนของไฟล์
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin')
+    allowed_origins = [
+        "https://mangoleafanalyzer.onrender.com",
+        "http://localhost:3000",
+        "https://localhost:3000"
+    ]
+    
+    if origin in allowed_origins:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+    else:
+        response.headers.add('Access-Control-Allow-Origin', 'https://mangoleafanalyzer.onrender.com')
+        
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
+
 # ================= Helper Function: Verify Password =================
 def verify_password(email, password):
     """
